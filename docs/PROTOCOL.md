@@ -1,0 +1,434 @@
+# FarNDone Protocol Specification (v1)
+
+This document specifies the communication protocol between the FarNDone Android mobile application (client) and the FarNDone Desktop application (server).
+
+---
+
+## 1. Overview & Transport
+
+- **Primary Transport**: WebSocket over TCP (`ws://<pc-ip>:<port>/ws`), port `8765` by default.
+- **Secondary Transport**: Bluetooth RFCOMM (utilizing the identical JSON message structures).
+- **Encoding**: UTF-8 encoded text frames, containing exactly one JSON object per WebSocket frame.
+- **Design Philosophy**: Minimal payload size, low transmission latency, strictly validated inputs, and human-readable field names for easy debugging, testing, and audits.
+
+---
+
+## 2. Versioning
+
+Every message transmitted over FarNDone **must** include the protocol version field:
+
+```json
+"v": 1
+```
+
+### Why Versioning Matters
+1. **Compatibility Check**: If the client sends `"v": 2` to a server that only understands `"v": 1`, the server can gracefully reject the connection with a meaningful error rather than crashing or misinterpreting fields.
+2. **Backward & Forward Evolution**: As features evolve (e.g., adding encryption, multi-touch trackpad gestures, or file transfer), the version field allows the protocol parser to switch message schemas cleanly.
+3. **Long-Term Maintainability**: Ensures clients and servers running different release versions can negotiate capabilities or fail safely without undefined behavior.
+
+---
+
+## 3. Envelope Structure
+
+All messages follow a flat, concise JSON envelope:
+
+| Field | Type | Description |
+|---|---|---|
+| `v` | Integer | Protocol version (must be `1`). |
+| `t` | String | Message type discriminator (e.g., `"auth"`, `"move"`, `"click"`). |
+| *payload* | Various | Type-specific fields flattened into the root object to avoid nested allocation overhead. |
+
+---
+
+## 4. Phone to PC Messages (Client -> Server)
+
+### 4.1. `auth` (First-Time Pairing with 6-Digit Code)
+Sent when the client connects for the first time using the one-time code shown on the PC screen or scanned from the QR code.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"auth"` | Message type. |
+| `code` | String | `^[0-9]{6}$` (exactly 6 digits) | Temporary one-time pairing code displayed on the PC. |
+| `device` | String | 1 to 64 characters | Friendly name of the phone (e.g., `"Pixel 7"`, `"Galaxy S23"`). |
+
+```json
+{"v":1,"t":"auth","code":"482913","device":"Pixel 7"}
+```
+
+---
+
+### 4.2. `auth` (Reconnection with Device Token)
+Sent when a previously paired phone reconnects to the PC using its stored authorization token.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"auth"` | Message type. |
+| `token` | String | 32 to 128 characters | Cryptographic device token received during initial pairing. |
+| `device` | String | 1 to 64 characters | Friendly name of the phone. |
+
+```json
+{"v":1,"t":"auth","token":"a8f5c2d3e91b40748123abcdef9876543210fedcba0123456789abcdef123456","device":"Pixel 7"}
+```
+
+---
+
+### 4.3. `move` (Relative Cursor Movement)
+Transmits delta X and delta Y coordinates for mouse movement. The Android client batches touch movements and sends updates approximately every 16 ms (~60 FPS) while fingers are in motion.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"move"` | Message type. |
+| `dx` | Integer | -1000 to +1000 | Relative change in the horizontal axis (pixels). |
+| `dy` | Integer | -1000 to +1000 | Relative change in the vertical axis (pixels). |
+
+```json
+{"v":1,"t":"move","dx":12,"dy":-4}
+```
+
+---
+
+### 4.4. `click` (Mouse Click)
+Simulates a momentary button press and release (single or double click).
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"click"` | Message type. |
+| `btn` | String | `"left"` \| `"right"` \| `"middle"` | Target mouse button. |
+| `n` | Integer | `1` or `2` | Number of clicks (`1` for single click, `2` for double click). |
+
+```json
+{"v":1,"t":"click","btn":"left","n":1}
+```
+
+```json
+{"v":1,"t":"click","btn":"left","n":2}
+```
+
+---
+
+### 4.5. `btn` (Mouse Button Press / Release)
+Used for drag-and-drop operations, holding buttons down, or using dedicated left/right click buttons on the mobile UI.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"btn"` | Message type. |
+| `btn` | String | `"left"` \| `"right"` \| `"middle"` | Target mouse button. |
+| `down` | Boolean | `true` \| `false` | `true` = button pressed down; `false` = button released up. |
+
+```json
+{"v":1,"t":"btn","btn":"left","down":true}
+```
+
+---
+
+### 4.6. `scroll` (Vertical Scroll)
+Transmits vertical wheel scrolling increments generated by the right-hand scroll strip or a two-finger scroll gesture.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"scroll"` | Message type. |
+| `dy` | Integer | -100 to +100 | Number of scroll steps/clicks (positive = scroll up, negative = scroll down, inverted if natural scrolling is enabled). |
+
+```json
+{"v":1,"t":"scroll","dy":-3}
+```
+
+---
+
+### 4.7. `key` (Key Press / Release)
+Simulates standard keyboard keys (useful for presentation shortcuts, Esc, Enter, etc.).
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"key"` | Message type. |
+| `code` | String | Whitelist: `"ArrowRight"`, `"ArrowLeft"`, `"ArrowUp"`, `"ArrowDown"`, `"Escape"`, `"F5"`, `"Space"`, `"Enter"`, `"Backspace"`, `"Tab"`, `"b"`, `"B"` | Virtual key identifier. |
+| `down` | Boolean | `true` \| `false` | `true` = key down; `false` = key up. |
+
+```json
+{"v":1,"t":"key","code":"ArrowRight","down":true}
+```
+
+---
+
+### 4.8. `text` (Text Typing Injection)
+Injects arbitrary text strings directly (e.g., from Android software keyboard).
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"text"` | Message type. |
+| `s` | String | 1 to 256 characters | The text string to inject on the PC. |
+
+```json
+{"v":1,"t":"text","s":"hello"}
+```
+
+---
+
+### 4.9. `media` (Media and Audio Controls)
+Controls media playback and master volume on the PC.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"media"` | Message type. |
+| `cmd` | String | `"volUp"` \| `"volDown"` \| `"mute"` \| `"playPause"` \| `"next"` \| `"prev"` | Audio or media command. |
+
+```json
+{"v":1,"t":"media","cmd":"volUp"}
+```
+
+---
+
+### 4.10. `slide` (Presentation Controls)
+Dedicated presentation actions mapped to standard slide show behaviors.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"slide"` | Message type. |
+| `cmd` | String | `"next"` \| `"prev"` \| `"start"` \| `"end"` \| `"black"` | Presentation action: `start` triggers F5; `end` triggers Esc; `black` toggles 'b' (black screen). |
+
+```json
+{"v":1,"t":"slide","cmd":"next"}
+```
+
+---
+
+### 4.11. `ptr` (Gyroscope Digital Pointer)
+Transmits delta coordinates calculated from the phone's gyroscope while the "Hold to use laser pointer" button is actively held down.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"ptr"` | Message type. |
+| `dx` | Integer / Float | -500 to +500 | Filtered horizontal angular displacement. |
+| `dy` | Integer / Float | -500 to +500 | Filtered vertical angular displacement. |
+
+```json
+{"v":1,"t":"ptr","dx":3,"dy":-2}
+```
+
+---
+
+### 4.12. `ping` (Heartbeat / Round-Trip Latency Measurement)
+Periodically sent by the phone to verify connection health and calculate round-trip latency shown in the UI (e.g., `"Fedora · 12 ms"`).
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"ping"` | Message type. |
+| `id` | Integer | 0 to 2,147,483,647 | Incrementing sequence counter. |
+
+```json
+{"v":1,"t":"ping","id":1}
+```
+
+---
+
+## 5. PC to Phone Messages (Server -> Client)
+
+### 5.1. `pairRequest` (Awaiting User Consent)
+Sent to the phone immediately after a valid 6-digit code is received, indicating that the PC is showing an "Allow / Deny" prompt to the computer owner.
+
+| Field | Type | Description |
+|---|---|---|
+| `v` | Integer | Protocol version (`1`). |
+| `t` | String | `"pairRequest"`. |
+
+```json
+{"v":1,"t":"pairRequest"}
+```
+
+---
+
+### 5.2. `paired` (Initial Pairing Completed)
+Sent to the phone once the PC owner clicks "Allow". Provides the persistent token for future reconnections.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"paired"` | Message type. |
+| `token` | String | >= 32 bytes (hex/base64) | Secure random device token to be stored in Android `SharedPreferences`. |
+| `pc` | String | 1 to 64 characters | Hostname or friendly name of the PC (e.g., `"Fedora"`, `"Windows 11"`). |
+
+```json
+{"v":1,"t":"paired","token":"3f8a9c1e4d2b5a6c7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d","pc":"Fedora"}
+```
+
+---
+
+### 5.3. `authOk` (Reconnection Successful)
+Sent to the phone when reconnecting using a valid stored device token.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"authOk"` | Message type. |
+| `pc` | String | 1 to 64 characters | Hostname or friendly name of the PC. |
+
+```json
+{"v":1,"t":"authOk","pc":"Fedora"}
+```
+
+---
+
+### 5.4. `authFail` (Authentication or Pairing Rejection)
+Sent when authentication or pairing fails. The server closes the WebSocket immediately after transmitting this message.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"authFail"` | Message type. |
+| `reason` | String | `"badCode"` \| `"expired"` \| `"denied"` \| `"badToken"` \| `"tooManyAttempts"` | Explicit machine-readable reason code. |
+
+```json
+{"v":1,"t":"authFail","reason":"badCode"}
+```
+
+---
+
+### 5.5. `pong` (Heartbeat Response)
+Sent immediately in response to a `ping` message.
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"pong"` | Message type. |
+| `id` | Integer | Matches incoming `ping.id` | Sequence identifier echoing the client request. |
+
+```json
+{"v":1,"t":"pong","id":1}
+```
+
+---
+
+### 5.6. `state` (PC State Update)
+Sent to the phone upon successful authentication and whenever PC audio state changes (e.g., volume adjusted or muted).
+
+| Field | Type | Range / Format | Description |
+|---|---|---|---|
+| `v` | Integer | `1` | Protocol version. |
+| `t` | String | `"state"` | Message type. |
+| `volume` | Integer | 0 to 100 | Current master output volume percentage. |
+| `muted` | Boolean | `true` \| `false` | Whether audio output is currently muted. |
+
+```json
+{"v":1,"t":"state","volume":60,"muted":false}
+```
+
+---
+
+## 6. Authentication and Pairing Sequences
+
+### Sequence 1: First-Time Pairing (QR Code / Manual 6-Digit PIN)
+
+```
+Android Phone                                      Desktop PC
+     |                                                  |
+     | [1. User scans QR or inputs IP/Port/Code]        | (Generates 6-digit PIN)
+     |                                                  | (Starts 2-min expiry timer)
+     | ---------- 2. WebSocket Connect ws:// ---------> |
+     |                                                  |
+     | ---------- 3. {"v":1,"t":"auth","code":"482913","device":"Pixel 7"} --------->
+     |                                                  | [4. Validates PIN & Rate Limits]
+     | <--------- 5. {"v":1,"t":"pairRequest"} -------- | (Displays "Allow Android phone?" prompt)
+     |                                                  |
+     |                                                  | [6. PC User clicks "Allow"]
+     |                                                  | (Generates 32-byte raw token)
+     |                                                  | (Stores SHA-256 hash in trusted list)
+     | <--------- 7. {"v":1,"t":"paired","token":"...","pc":"Fedora"} --------------
+     |                                                  |
+     | <--------- 8. {"v":1,"t":"state","volume":60,"muted":false} -----------------
+     |                                                  |
+     | [9. Saves token to SharedPreferences]            |
+     | [10. Session Authenticated: Ready for commands]  |
+```
+
+1. **PC Generates PIN**: At startup or when requested, PC generates a cryptographically random 6-digit numeric string (valid for 2 minutes).
+2. **User Initiates Connection**: User opens FarNDone on Android, scans the desktop QR code (encoded as `farndone://<ip>:<port>/<pin>`), or manually enters address, port, and code.
+3. **Socket Handshake**: Android client establishes WebSocket connection to `ws://<ip>:<port>/ws`.
+4. **Auth Initiation**: Client immediately sends `{"v":1,"t":"auth","code":"...","device":"..."}`.
+5. **Code Validation**:
+   - If incorrect: PC increments failed attempt counter. If attempts > 5, PC responds with `{"v":1,"t":"authFail","reason":"tooManyAttempts"}` and locks pairing for 60 seconds. Otherwise responds with `{"v":1,"t":"authFail","reason":"badCode"}`.
+   - If expired (> 2 minutes): PC responds with `{"v":1,"t":"authFail","reason":"expired"}`.
+   - If correct: PC marks socket state as `PendingApproval` and sends `{"v":1,"t":"pairRequest"}` to phone.
+6. **User Consent on PC**: PC UI shows prompt: `"Allow <device> to control this PC? [Allow] [Deny]"`.
+   - If **Deny** is clicked: PC sends `{"v":1,"t":"authFail","reason":"denied"}` and closes socket.
+   - If **Allow** is clicked: PC generates a 32-byte cryptographically secure random token, computes its SHA-256 hash, stores the hash and device name in persistent storage (`trusted_devices.json`), and sends `{"v":1,"t":"paired","token":"<token>","pc":"<hostname>"}` to the phone.
+7. **Initial State Push**: PC sends `{"v":1,"t":"state","volume":...,"muted":...}`.
+8. **Storage & Ready**: Phone stores token and PC details in `SharedPreferences`. The connection is now active and ready to transmit input events.
+
+---
+
+### Sequence 2: Subsequent Reconnection (Persistent Token)
+
+```
+Android Phone                                      Desktop PC
+     |                                                  |
+     | ---------- 1. WebSocket Connect ws:// ---------> |
+     |                                                  |
+     | ---------- 2. {"v":1,"t":"auth","token":"...","device":"Pixel 7"} ---------->
+     |                                                  | [3. Compute SHA-256(token)]
+     |                                                  | [4. Lookup hash in trusted devices]
+     | <--------- 5. {"v":1,"t":"authOk","pc":"Fedora"} ---------------------------
+     | <--------- 6. {"v":1,"t":"state","volume":60,"muted":false} -----------------
+     |                                                  |
+     | [7. Session Authenticated: Ready for commands]   |
+```
+
+1. **Connect**: Phone connects to `ws://<saved-ip>:<port>/ws`.
+2. **Token Auth**: Phone sends `{"v":1,"t":"auth","token":"<token>","device":"Pixel 7"}`.
+3. **Hash Verification**: PC computes SHA-256 of the incoming token and checks if the hash exists in the trusted devices registry.
+4. **Outcome**:
+   - If match found: PC marks connection as authenticated, sends `authOk`, and pushes the current audio `state`.
+   - If no match (or token revoked by user in PC settings): PC sends `{"v":1,"t":"authFail","reason":"badToken"}` and terminates the socket connection.
+
+---
+
+### Sequence 3: Latency Measurement & Keep-Alive
+
+```
+Android Phone                                      Desktop PC
+     |                                                  |
+     | ---------- 1. {"v":1,"t":"ping","id":42} ------> |
+     | <--------- 2. {"v":1,"t":"pong","id":42} ------- |
+     |                                                  |
+     | [Calculates RTT = now - timestamp(42)]           |
+     | [Updates UI: "Fedora · 12 ms"]                   |
+```
+
+The client measures round-trip time ($RTT$) to inform the user of connection quality and keep active Wi-Fi radio channels open.
+
+---
+
+## 7. Security Rules & Input Validation
+
+Because the desktop server has the capability to inject operating system input and keystrokes, security defenses are strictly enforced:
+
+1. **Unauthenticated Socket Policy**:
+   - Any message received on an unauthenticated socket other than `"auth"` or `"ping"` causes the server to **immediately terminate the connection**.
+2. **Rate Limiting & Lockout**:
+   - Maximum 5 failed pairing attempts allowed within 5 minutes.
+   - Once exceeded, the server enters a 60-second cooldown period, rejecting all code-based pairing attempts with `"reason":"tooManyAttempts"`.
+3. **Single-Use & Expiring Codes**:
+   - Pairing codes expire after exactly 120 seconds (2 minutes).
+   - Once successfully used to pair a device, the pairing code is immediately invalidated and regenerated.
+4. **Token Security (Never Store Plaintext)**:
+   - Device tokens are generated using a cryptographically secure random number generator (`RandomNumberGenerator.GetBytes(32)`).
+   - The desktop server **only stores the SHA-256 hash** of the token. A leak of the desktop's storage file cannot expose tokens capable of authenticating.
+5. **No Shell Ingestion**:
+   - The desktop app **never passes user strings directly to a shell command**.
+   - Input injection is handled exclusively through native kernel/OS APIs (`/dev/uinput` on Linux, `SendInput` on Windows).
+6. **Payload Size & Range Limits**:
+   - Maximum incoming WebSocket frame size: 4,096 bytes (4 KB). Excessively large frames are dropped and the socket is closed.
+   - Numeric inputs (`dx`, `dy`) are clamped to $[-1000, 1000]$.
+   - String inputs (`s`) are clamped to a maximum length of 256 characters.
+   - Key codes (`code`) are validated against a strict compile-time whitelist.

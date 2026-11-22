@@ -1,0 +1,63 @@
+# FarNDone .gitignore
+# Covers .NET 10, Android (Java/Gradle), JetBrains/Android Studio, VS Code, and OS artifacts.
+
+# ----------------------------------------------------------------------------
+# .NET / C#
+# ----------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Tt]est[Rr]esults/
+*.suo
+*.user
+*.userprefs
+*.sln.docstates
+.vs/
+*.DotSettings.user
+appsettings.Development.json
+
+# ----------------------------------------------------------------------------
+# Android / Gradle / Java
+# ----------------------------------------------------------------------------
+.gradle/
+build/
+*/build/
+local.properties
+*.apk
+*.ap_
+*.aab
+.cxx/
+captures/
+*.class
+
+# ----------------------------------------------------------------------------
+# IDEs and Editors
+# ----------------------------------------------------------------------------
+# Android Studio & IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Visual Studio Code
+.vscode/
+
+# Editor swap files
+*~
+*.swp
+*.swo
+
+# ----------------------------------------------------------------------------
+# Operating System Files
+# ----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# ----------------------------------------------------------------------------
+# Runtime Data & Secrets
+# ----------------------------------------------------------------------------
+# Prevent accidental commits of pairing secrets or local device databases
+trusted_devices.json
+*.token
