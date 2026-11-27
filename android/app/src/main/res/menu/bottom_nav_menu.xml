@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/nav_connect" android:title="@string/nav_connect" />
-    <item android:id="@+id/nav_trackpad" android:title="@string/nav_trackpad" />
-    <item android:id="@+id/nav_slides" android:title="@string/nav_slides" />
-    <item android:id="@+id/nav_media" android:title="@string/nav_media" />
-</menu>
